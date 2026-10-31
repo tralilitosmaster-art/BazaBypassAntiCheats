@@ -5,7 +5,6 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -99,6 +98,24 @@ local function label(parent, text, size, color, font, xAlign)
 end
 
 -- ============================================================
+-- LAYOUT — adaptive
+-- ============================================================
+local cam = workspace.CurrentCamera
+local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+local isNarrow = vp.X < 560
+
+local WIN_W = math.clamp(vp.X - 40, 320, 620)
+local WIN_H = math.clamp(vp.Y - 80, 380, 460)
+if isNarrow then
+    WIN_W = math.clamp(vp.X - 20, 300, 620)
+    WIN_H = math.clamp(vp.Y - 40, 360, 520)
+end
+
+local SIDEBAR_W = isNarrow and 0 or 150
+local SIDEBAR_H = isNarrow and 40 or 0
+
+-- ============================================================
 -- ROOT
 -- ============================================================
 local gui = Instance.new("ScreenGui")
@@ -109,15 +126,34 @@ gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = PlayerGui
 
 local root = Instance.new("Frame")
-root.Size = UDim2.new(0, 620, 0, 400)
-root.Position = UDim2.new(0.5, -310, 0.5, -200)
+root.Name = "Root"
+root.Size = UDim2.new(0, WIN_W, 0, WIN_H)
+root.Position = UDim2.new(0.5, -WIN_W / 2, 0.5, -WIN_H / 2)
 root.BackgroundColor3 = Theme.bg
 root.BorderSizePixel = 0
 root.Active = true
-root.Draggable = true
+root.Draggable = not isMobile
 root.Parent = gui
 corner(root, 12)
 stroke(root, Theme.stroke, 1)
+
+-- collapsed dot
+local dot = Instance.new("TextButton")
+dot.Name = "Collapsed"
+dot.Size = UDim2.new(0, 44, 0, 44)
+dot.Position = UDim2.new(1, -56, 1, -56)
+dot.BackgroundColor3 = Theme.panel
+dot.Text = "B"
+dot.TextColor3 = Theme.accent
+dot.TextSize = 16
+dot.Font = Theme.fontUIBold
+dot.BorderSizePixel = 0
+dot.Visible = false
+dot.Active = true
+dot.Draggable = true
+dot.Parent = gui
+corner(dot, 22)
+stroke(dot, Theme.accentDim, 1)
 
 -- title bar
 local titleBar = Instance.new("Frame")
@@ -135,7 +171,7 @@ verLbl.Position = UDim2.new(0, 62, 0, 0)
 
 local statusDot = Instance.new("Frame")
 statusDot.Size = UDim2.new(0, 8, 0, 8)
-statusDot.Position = UDim2.new(1, -110, 0.5, -4)
+statusDot.Position = UDim2.new(1, -150, 0.5, -4)
 statusDot.BackgroundColor3 = Theme.textDim
 statusDot.BorderSizePixel = 0
 statusDot.Parent = titleBar
@@ -143,7 +179,7 @@ corner(statusDot, 4)
 
 local statusLbl = label(titleBar, "inactive", 11, Theme.textDim, Theme.fontMono)
 statusLbl.Size = UDim2.new(0, 80, 1, 0)
-statusLbl.Position = UDim2.new(1, -96, 0, 0)
+statusLbl.Position = UDim2.new(1, -136, 0, 0)
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 28, 0, 28)
@@ -156,7 +192,19 @@ closeBtn.Font = Theme.fontUI
 closeBtn.BorderSizePixel = 0
 closeBtn.Parent = titleBar
 corner(closeBtn, 6)
-closeBtn.MouseButton1Click:Connect(function() gui.Enabled = false end)
+
+local function collapse()
+    root.Visible = false
+    dot.Visible = true
+end
+
+local function expand()
+    root.Visible = true
+    dot.Visible = false
+end
+
+closeBtn.MouseButton1Click:Connect(collapse)
+dot.MouseButton1Click:Connect(expand)
 
 -- divider
 local div = Instance.new("Frame")
@@ -168,15 +216,25 @@ div.Parent = root
 
 -- sidebar
 local sidebar = Instance.new("Frame")
-sidebar.Size = UDim2.new(0, 150, 1, -52)
-sidebar.Position = UDim2.new(0, 18, 0, 48)
+sidebar.Size = UDim2.new(0, SIDEBAR_W, isNarrow and 0 or 1, isNarrow and SIDEBAR_H or -52)
+sidebar.Position = UDim2.new(0, isNarrow and 18 or 18, isNarrow and 48 or 48, isNarrow and -4 or 0)
+if isNarrow then
+    sidebar.Size = UDim2.new(1, -36, 0, SIDEBAR_H)
+    sidebar.Position = UDim2.new(0, 18, 0, 48)
+end
 sidebar.BackgroundTransparency = 1
+sidebar.ClipsDescendants = false
 sidebar.Parent = root
 
 -- content
 local content = Instance.new("Frame")
-content.Size = UDim2.new(1, -204, 1, -52)
-content.Position = UDim2.new(0, 186, 0, 48)
+if isNarrow then
+    content.Size = UDim2.new(1, -36, 1, -(48 + SIDEBAR_H + 16))
+    content.Position = UDim2.new(0, 18, 0, 48 + SIDEBAR_H + 8)
+else
+    content.Size = UDim2.new(1, -(SIDEBAR_W + 54), 1, -52)
+    content.Position = UDim2.new(0, SIDEBAR_W + 36, 0, 48)
+end
 content.BackgroundTransparency = 1
 content.Parent = root
 
@@ -186,29 +244,55 @@ content.Parent = root
 local tabs = {}
 local pages = {}
 local currentTab = nil
+local tabCounter = 0
+
+local sidebarLayout = Instance.new("UIListLayout")
+sidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+if isNarrow then
+    sidebarLayout.FillDirection = Enum.FillDirection.Horizontal
+    sidebarLayout.Padding = UDim.new(0, 6)
+    sidebarLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+    sidebarLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+else
+    sidebarLayout.FillDirection = Enum.FillDirection.Vertical
+    sidebarLayout.Padding = UDim.new(0, 4)
+end
+sidebarLayout.Parent = sidebar
 
 local function makeTab(id, name)
+    tabCounter = tabCounter + 1
+
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 34)
+    if isNarrow then
+        btn.Size = UDim2.new(0, 90, 0, 30)
+    else
+        btn.Size = UDim2.new(1, 0, 0, 34)
+    end
     btn.BackgroundColor3 = Theme.panel
     btn.BackgroundTransparency = 1
     btn.Text = ""
     btn.BorderSizePixel = 0
+    btn.LayoutOrder = tabCounter
     btn.Parent = sidebar
     corner(btn, 8)
 
     local ind = Instance.new("Frame")
-    ind.Size = UDim2.new(0, 2, 0, 16)
-    ind.Position = UDim2.new(0, 0, 0.5, -8)
+    if isNarrow then
+        ind.Size = UDim2.new(1, -12, 0, 2)
+        ind.Position = UDim2.new(0, 6, 1, -3)
+    else
+        ind.Size = UDim2.new(0, 2, 0, 16)
+        ind.Position = UDim2.new(0, 0, 0.5, -8)
+    end
     ind.BackgroundColor3 = Theme.accent
     ind.BorderSizePixel = 0
     ind.Visible = false
     ind.Parent = btn
     corner(ind, 1)
 
-    local lbl = label(btn, name, 13, Theme.textDim, Theme.fontUI)
-    lbl.Size = UDim2.new(1, -24, 1, 0)
-    lbl.Position = UDim2.new(0, 18, 0, 0)
+    local lbl = label(btn, name, 12, Theme.textDim, Theme.fontUI, Enum.TextXAlignment.Center)
+    lbl.Size = UDim2.new(1, -12, 1, 0)
+    lbl.Position = UDim2.new(0, 6, 0, 0)
 
     local page = Instance.new("Frame")
     page.Size = UDim2.new(1, 0, 1, 0)
@@ -243,11 +327,20 @@ local addPage  = makeTab("addons", "Addons")
 -- ============================================================
 -- HOME
 -- ============================================================
+local homeScroll = Instance.new("ScrollingFrame")
+homeScroll.Size = UDim2.new(1, 0, 1, 0)
+homeScroll.BackgroundTransparency = 1
+homeScroll.BorderSizePixel = 0
+homeScroll.ScrollBarThickness = 3
+homeScroll.ScrollBarImageColor3 = Theme.stroke
+homeScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+homeScroll.Parent = homePage
+
 local profileCard = Instance.new("Frame")
 profileCard.Size = UDim2.new(1, 0, 0, 96)
 profileCard.BackgroundColor3 = Theme.panel
 profileCard.BorderSizePixel = 0
-profileCard.Parent = homePage
+profileCard.Parent = homeScroll
 corner(profileCard, 10)
 stroke(profileCard, Theme.stroke, 1)
 
@@ -278,20 +371,19 @@ task.spawn(function()
     if ok and img then avatar.Image = img end
 end)
 
--- loaded functions list
-local listHeader = label(homePage, "LOADED FUNCTIONS", 11, Theme.textDim, Theme.fontMono)
+local listHeader = label(homeScroll, "LOADED FUNCTIONS", 11, Theme.textDim, Theme.fontMono)
 listHeader.Size = UDim2.new(1, 0, 0, 18)
 listHeader.Position = UDim2.new(0, 2, 0, 108)
 
 local funcList = Instance.new("ScrollingFrame")
-funcList.Size = UDim2.new(1, 0, 1, -140)
+funcList.Size = UDim2.new(1, 0, 0, 220)
 funcList.Position = UDim2.new(0, 0, 0, 130)
 funcList.BackgroundColor3 = Theme.panel
 funcList.BorderSizePixel = 0
 funcList.ScrollBarThickness = 3
 funcList.ScrollBarImageColor3 = Theme.stroke
 funcList.CanvasSize = UDim2.new(0, 0, 0, 0)
-funcList.Parent = homePage
+funcList.Parent = homeScroll
 corner(funcList, 10)
 stroke(funcList, Theme.stroke, 1)
 
@@ -326,6 +418,8 @@ local function refreshFuncList()
     end
     funcList.CanvasSize = UDim2.new(0, 0, 0, funcLayout.AbsoluteContentSize.Y + 12)
 end
+
+homeScroll.CanvasSize = UDim2.new(0, 0, 0, 130 + 220 + 8)
 
 -- ============================================================
 -- AC
@@ -370,6 +464,7 @@ local function makeCategory(parent, titleText, key)
         local ds = label(card, m.desc, 11, Theme.textDim, Theme.fontUI)
         ds.Size = UDim2.new(1, -80, 0, 16)
         ds.Position = UDim2.new(0, 14, 0, 30)
+        ds.TextTruncate = Enum.TextTruncate.AtEnd
 
         local toggle = Instance.new("TextButton")
         toggle.Size = UDim2.new(0, 48, 0, 24)
@@ -402,7 +497,7 @@ local function makeCategory(parent, titleText, key)
 end
 
 local acScroll = Instance.new("ScrollingFrame")
-acScroll.Size = UDim2.new(1, 0, 1, -50)
+acScroll.Size = UDim2.new(1, 0, 1, -46)
 acScroll.Position = UDim2.new(0, 0, 0, 0)
 acScroll.BackgroundTransparency = 1
 acScroll.BorderSizePixel = 0
@@ -419,12 +514,10 @@ acLayout.Parent = acScroll
 makeCategory(acScroll, "HUMANOID — speed / fly / noclip", "humanoid").LayoutOrder = 1
 makeCategory(acScroll, "ALT — server authority bypass", "alt").LayoutOrder = 2
 
-acScroll.CanvasSize = UDim2.new(0, 0, 0, acLayout.AbsoluteContentSize.Y + 12)
 acLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
     acScroll.CanvasSize = UDim2.new(0, 0, 0, acLayout.AbsoluteContentSize.Y + 12)
 end)
 
--- activate button
 local activateBtn = Instance.new("TextButton")
 activateBtn.Size = UDim2.new(1, 0, 0, 36)
 activateBtn.Position = UDim2.new(0, 0, 1, -36)
@@ -467,14 +560,14 @@ end)
 -- ============================================================
 -- ADDONS
 -- ============================================================
-local addHint = label(addPage, "Paste addon source or load URL via executor. Addons run in sandboxed env.", 11, Theme.textDim, Theme.fontUI)
-addHint.Size = UDim2.new(1, 0, 0, 30)
+local addHint = label(addPage, "Paste addon source. Runs sandboxed.", 11, Theme.textDim, Theme.fontUI)
+addHint.Size = UDim2.new(1, 0, 0, 24)
 addHint.Position = UDim2.new(0, 2, 0, 0)
 addHint.TextWrapped = true
 
 local addBox = Instance.new("TextBox")
 addBox.Size = UDim2.new(1, 0, 0, 80)
-addBox.Position = UDim2.new(0, 0, 0, 36)
+addBox.Position = UDim2.new(0, 0, 0, 30)
 addBox.BackgroundColor3 = Theme.panel
 addBox.BorderSizePixel = 0
 addBox.Text = ""
@@ -494,7 +587,7 @@ pad(addBox, 8)
 
 local loadBtn = Instance.new("TextButton")
 loadBtn.Size = UDim2.new(0, 120, 0, 32)
-loadBtn.Position = UDim2.new(0, 0, 0, 124)
+loadBtn.Position = UDim2.new(0, 0, 0, 118)
 loadBtn.BackgroundColor3 = Theme.panelAlt
 loadBtn.Text = "LOAD ADDON"
 loadBtn.TextColor3 = Theme.text
@@ -506,8 +599,8 @@ corner(loadBtn, 8)
 stroke(loadBtn, Theme.stroke, 1)
 
 local addLog = Instance.new("ScrollingFrame")
-addLog.Size = UDim2.new(1, 0, 1, -200)
-addLog.Position = UDim2.new(0, 0, 0, 164)
+addLog.Size = UDim2.new(1, 0, 1, -158)
+addLog.Position = UDim2.new(0, 0, 0, 158)
 addLog.BackgroundColor3 = Theme.panel
 addLog.BorderSizePixel = 0
 addLog.ScrollBarThickness = 3
@@ -577,5 +670,4 @@ tabs.home.btn.MouseButton1Click:Fire()
 refreshFuncList()
 log("BBAC V0.1.0 initialized")
 
--- expose bypass API for addons / external hooks
 _G.BBAC_Bypass = _G.BBAC_Bypass or {}
